@@ -9,11 +9,15 @@ export const AuthProvider = ({ children }) => {
       const storedUser = localStorage.getItem('user');
       const token = localStorage.getItem('token');
 
-      if (storedUser && token) {
+      
+      if (storedUser && storedUser !== 'undefined' && token) {
         return JSON.parse(storedUser);
       }
     } catch (error) {
       console.error("Local storage data eka kiyawaddi getaluwak:", error);
+      
+      localStorage.removeItem('user');
+      localStorage.removeItem('token');
     }
     return null;
   });
