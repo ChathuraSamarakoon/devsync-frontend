@@ -3,6 +3,7 @@ import { useContext } from 'react';
 import { AuthContext } from './context/AuthContext';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import Dashboard from './pages/Dashboard';
 
 
 const PrivateRoute = ({ children }) => {
@@ -25,9 +26,7 @@ function App() {
           path="/" 
           element={
             <PrivateRoute>
-              <div className="min-h-screen flex items-center justify-center bg-background text-on-background">
-                <h1 className="text-3xl font-mono">Main Dashboard (Coming Soon)</h1>
-              </div>
+              <Dashboard />
             </PrivateRoute>
           } 
         />

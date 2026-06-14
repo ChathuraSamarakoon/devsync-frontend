@@ -19,10 +19,19 @@ const Login = () => {
     setIsLoading(true);
     try {
       const data = await loginUser({ email, password });
-      login(data.user, data.token);
+      
+      if (!data.token) {
+        throw new Error("Token missing from backend");
+      }
+
+      
+      const { token, ...userData } = data;
+
+      login(userData, token);
       navigate('/');
     } catch (err) {
-      setError(err.response?.data?.message || 'Login failed. Please check your credentials.');
+      console.error("Login Error:", err);
+      setError(err.response?.data?.message || err.message || 'Login failed.');
     } finally {
       setIsLoading(false);
     }
