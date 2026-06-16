@@ -2,22 +2,23 @@ import { useState, useContext, useEffect, useRef } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { SocketContext } from '../context/SocketContext';
 import { WorkspaceContext } from '../context/WorkspaceContext';
-import { FiSend, FiHash, FiMessageSquare, FiImage, FiX } from 'react-icons/fi';
+import { FiSend, FiUser, FiImage, FiX } from 'react-icons/fi'; 
 import axios from 'axios';
 
-const ChatArea = () => {
+const DirectMessageArea = () => {
   const { user } = useContext(AuthContext);
   const { socket } = useContext(SocketContext);
-  const { activeChannel } = useContext(WorkspaceContext);
+  const { activeDMUser } = useContext(WorkspaceContext);
   
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [isSending, setIsSending] = useState(false);
   
-  // File Upload States 
+  // File Upload States
   const [selectedFile, setSelectedFile] = useState(null);
   const fileInputRef = useRef(null);
-  
+
+  // Typing state
   const [typingUser, setTypingUser] = useState(null);
   const typingTimeoutRef = useRef(null);
   
@@ -29,36 +30,42 @@ const ChatArea = () => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, typingUser]); 
+  }, [messages, typingUser]);
 
+  
   useEffect(() => {
     const fetchMessages = async () => {
-      if (!activeChannel) return;
+      if (!activeDMUser) return;
       try {
         const token = localStorage.getItem('token');
         const config = { headers: { Authorization: `Bearer ${token}` } };
-        const { data } = await axios.get(`/api/messages/${activeChannel._id}`, config);
+        const { data } = await axios.get(`/api/dms/${activeDMUser._id}`, config);
         setMessages(data);
       } catch (error) {
-        console.error("Error fetching messages:", error);
+        console.error("Error fetching direct messages:", error);
       }
     };
     fetchMessages();
-  }, [activeChannel]);
+  }, [activeDMUser]);
 
+  
   useEffect(() => {
-    if (!socket || !activeChannel) return;
+    if (!socket || !activeDMUser) return;
 
-    socket.emit('join_channel', String(activeChannel._id));
+    const handleReceiveDM = (newMessage) => {
+      const isFromActiveUser = newMessage.sender._id === activeDMUser._id;
+      const isFromMe = newMessage.sender._id === user._id;
+      const isToActiveUser = newMessage.receiver === activeDMUser._id;
 
-    const handleReceiveMessage = (newMessage) => {
-      if (newMessage.sender._id !== user._id) {
-        setMessages((prev) => [...prev, newMessage]);
+      if ((isFromActiveUser && !isFromMe) || (isFromMe && isToActiveUser)) {
+         if (!isFromMe) {
+           setMessages((prev) => [...prev, newMessage]);
+         }
       }
     };
 
     const handleTyping = (data) => {
-      if (data.userName !== user.name) {
+      if (data.userName === activeDMUser.name) {
         setTypingUser(data.userName);
       }
     };
@@ -67,33 +74,31 @@ const ChatArea = () => {
       setTypingUser(null);
     };
 
-    socket.on('receive_message', handleReceiveMessage);
+    socket.on('new_dm', handleReceiveDM);
     socket.on('typing', handleTyping);
     socket.on('stop_typing', handleStopTyping);
 
     return () => {
-      socket.emit('leave_channel', String(activeChannel._id));
-      socket.off('receive_message', handleReceiveMessage);
+      socket.off('new_dm', handleReceiveDM);
       socket.off('typing', handleTyping);
       socket.off('stop_typing', handleStopTyping);
-      
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     };
-  }, [socket, activeChannel, user._id, user.name]);
+  }, [socket, activeDMUser, user._id]);
 
   const handleInputChange = (e) => {
     setInputValue(e.target.value);
 
-    if (!socket || !activeChannel) return;
+    if (!socket || !activeDMUser) return;
 
-    socket.emit('typing', { channelId: activeChannel._id, userName: user.name });
+    socket.emit('typing', { channelId: activeDMUser._id, userName: user.name });
 
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
 
     typingTimeoutRef.current = setTimeout(() => {
-      socket.emit('stop_typing', { channelId: activeChannel._id });
+      socket.emit('stop_typing', { channelId: activeDMUser._id });
     }, 2000);
   };
 
@@ -107,13 +112,13 @@ const ChatArea = () => {
   const handleSendMessage = async (e) => {
     e.preventDefault();
     
-    if ((!inputValue.trim() && !selectedFile) || !activeChannel) return;
+    if ((!inputValue.trim() && !selectedFile) || !activeDMUser) return;
 
     setIsSending(true);
     const messageContent = inputValue;
     setInputValue(''); 
 
-    socket.emit('stop_typing', { channelId: activeChannel._id });
+    socket.emit('stop_typing', { channelId: activeDMUser._id });
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
 
     try {
@@ -133,26 +138,24 @@ const ChatArea = () => {
         };
 
         const uploadRes = await axios.post('/api/upload', formData, uploadConfig);
-        attachmentUrl = uploadRes.data.url;
+        attachmentUrl = uploadRes.data.url; 
         setSelectedFile(null); 
       }
 
       
       const config = { headers: { Authorization: `Bearer ${token}` } };
-      
       const messageData = {
         content: messageContent,
-        channelId: activeChannel._id,
+        receiverId: activeDMUser._id,
         attachment: attachmentUrl, 
       };
 
-      const { data } = await axios.post('/api/messages', messageData, config);
+      const { data } = await axios.post('/api/dms', messageData, config);
 
       setMessages((prev) => [...prev, data]);
-      socket.emit('send_message', { ...data, channelId: activeChannel._id });
 
     } catch (error) {
-      console.error("Error sending message:", error);
+      console.error("Error sending direct message:", error);
       alert("Failed to send message!");
       setInputValue(messageContent); 
     } finally {
@@ -162,33 +165,31 @@ const ChatArea = () => {
     }
   };
 
-  if (!activeChannel) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center bg-background relative">
-        <div className="w-24 h-24 bg-surface-container rounded-full flex items-center justify-center mb-6 border border-outline/10">
-          <FiMessageSquare className="text-4xl text-primary/40" />
-        </div>
-        <h2 className="text-2xl font-bold text-on-surface mb-2">Welcome to DevSync</h2>
-        <p className="text-outline text-sm max-w-md text-center">
-          Select a workspace and choose a channel from the sidebar to start collaborating with your team.
-        </p>
-      </div>
-    );
-  }
+  if (!activeDMUser) return null;
 
   return (
     <div className="flex-1 flex flex-col relative h-full">
+      {/* DM Header */}
       <div className="h-16 border-b border-outline/20 flex items-center px-6 bg-surface-container/50 backdrop-blur-sm shrink-0">
-        <h2 className="text-xl font-bold text-on-surface flex items-center gap-2">
-          <FiHash className="text-outline" /> {activeChannel.name}
-        </h2>
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <div className="w-8 h-8 rounded-full bg-surface-bright flex items-center justify-center text-sm font-bold text-primary">
+              {activeDMUser.name.charAt(0).toUpperCase()}
+            </div>
+            <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-surface-container ${activeDMUser.status === 'online' ? 'bg-green-500' : 'bg-outline/50'}`}></div>
+          </div>
+          <h2 className="text-xl font-bold text-on-surface flex items-center gap-2">
+            {activeDMUser.name}
+          </h2>
+        </div>
       </div>
 
+      {/* Messages Area */}
       <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4 custom-scrollbar">
         {messages.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center opacity-50">
-            <FiMessageSquare className="text-4xl mb-4" />
-            <p>No messages here yet. Start the conversation!</p>
+            <FiUser className="text-4xl mb-4" />
+            <p>This is the beginning of your direct message history with {activeDMUser.name}.</p>
           </div>
         ) : (
           messages.map((msg) => {
@@ -207,8 +208,7 @@ const ChatArea = () => {
                   </div>
                   
                   {/* Message Bubble */}
-                  <div className={`px-4 py-2 text-sm shadow-sm ${isMe ? 'bg-primary-container text-on-primary-container rounded-2xl rounded-tr-sm' : 'bg-surface-container-highest text-on-surface rounded-2xl rounded-tl-sm'}`}>
-                    
+                  <div className={`px-4 py-2 text-sm shadow-sm ${isMe ? 'bg-secondary-container text-on-secondary-container rounded-2xl rounded-tr-sm' : 'bg-surface-container-highest text-on-surface rounded-2xl rounded-tl-sm'}`}>
                     
                     {msg.attachment && (
                       <div className="mb-2">
@@ -219,7 +219,6 @@ const ChatArea = () => {
                         />
                       </div>
                     )}
-
                     
                     {msg.content && <p>{msg.content}</p>}
                   </div>
@@ -231,7 +230,7 @@ const ChatArea = () => {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Typing Indicator UI */}
+      {/* Typing Indicator */}
       <div className="px-4 py-1 h-6 shrink-0 bg-background">
         {typingUser && (
           <div className="text-xs font-medium text-primary italic animate-pulse">
@@ -240,7 +239,7 @@ const ChatArea = () => {
         )}
       </div>
 
-      {/* File Preview Area*/}
+      {/* File Preview Area  */}
       {selectedFile && (
         <div className="px-6 py-2 bg-surface-container-highest border-t border-outline/10 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
@@ -263,7 +262,7 @@ const ChatArea = () => {
 
       {/* Input Area */}
       <div className="p-4 bg-background shrink-0 border-t border-outline/10 pt-2">
-        <form onSubmit={handleSendMessage} className="bg-surface-container border border-outline/20 rounded-lg p-1 flex items-center focus-within:border-primary focus-within:ring-1 focus-within:ring-primary transition-all">
+        <form onSubmit={handleSendMessage} className="bg-surface-container border border-outline/20 rounded-lg p-1 flex items-center focus-within:border-secondary focus-within:ring-1 focus-within:ring-secondary transition-all">
           
           {/* File Upload Button */}
           <button 
@@ -289,14 +288,15 @@ const ChatArea = () => {
             type="text" 
             value={inputValue}
             onChange={handleInputChange} 
-            placeholder={selectedFile ? "Add a message..." : `Message #${activeChannel.name}...`} 
+            placeholder={selectedFile ? "Add a message..." : `Message ${activeDMUser.name}...`} 
             disabled={isSending}
             className="flex-1 bg-transparent text-on-surface focus:outline-none px-3 py-2.5 disabled:opacity-50"
           />
+          
           <button 
             type="submit"
             disabled={(!inputValue.trim() && !selectedFile) || isSending}
-            className="p-2.5 mr-1 bg-primary-container text-on-primary-container rounded-md hover:bg-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+            className="p-2.5 mr-1 bg-secondary-container text-on-secondary-container rounded-md hover:bg-secondary hover:text-on-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
           >
             <FiSend />
           </button>
@@ -306,4 +306,4 @@ const ChatArea = () => {
   );
 };
 
-export default ChatArea;
+export default DirectMessageArea;

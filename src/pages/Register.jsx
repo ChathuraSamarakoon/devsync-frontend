@@ -1,6 +1,5 @@
-import { useState, useContext } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
 import { registerUser } from '../services/authService';
 import { FiUserPlus } from 'react-icons/fi';
 
@@ -9,7 +8,6 @@ const Register = () => {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   
-  const { login } = useContext(AuthContext);
   const navigate = useNavigate();
 
   const handleChange = (e) => {
@@ -21,12 +19,15 @@ const Register = () => {
     setError('');
     setIsLoading(true);
     try {
-      const data = await registerUser(formData);
       
-      const { token, ...userData } = data;
-      login(userData, token);
+      await registerUser(formData);
       
-      navigate('/');
+      
+      alert('Registration successful! Please log in.');
+      
+      
+      navigate('/login');
+      
     } catch (err) {
       setError(err.response?.data?.message || 'Registration failed. Please try again.');
     } finally {

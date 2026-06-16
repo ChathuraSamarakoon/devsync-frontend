@@ -1,32 +1,41 @@
 import { useContext, useState, useEffect } from 'react';
 import { AuthContext } from '../context/AuthContext';
-import { WorkspaceContext } from '../context/WorkspaceContext'; // අලුතින් ගෙනාවා
+import { WorkspaceContext } from '../context/WorkspaceContext';
+import { SocketContext } from '../context/SocketContext'; 
 import { 
-  FiHash, FiMessageSquare, FiSettings, FiUser, 
-  FiLogOut, FiPlus, FiFolder, FiX 
+  FiHash,  FiSettings, FiUser, 
+  FiLogOut, FiPlus, FiFolder, FiX, FiCheckSquare 
 } from 'react-icons/fi';
 import axios from 'axios';
 
 const Sidebar = () => {
   const { user, logout } = useContext(AuthContext);
   
-
-  const { activeWorkspace, setActiveWorkspace, activeChannel, setActiveChannel } = useContext(WorkspaceContext);
   
-  // Workspace Modal & Data States
+  const { 
+    activeWorkspace, setActiveWorkspace, 
+    activeChannel, setActiveChannel, 
+    activeDMUser, setActiveDMUser,
+    showTasks, setShowTasks 
+  } = useContext(WorkspaceContext);
+  
+  const { socket } = useContext(SocketContext); 
+  
+  // Workspace & Channel States
   const [workspaces, setWorkspaces] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [newWorkspaceName, setNewWorkspaceName] = useState('');
   const [newWorkspaceDesc, setNewWorkspaceDesc] = useState('');
   
-  // Channel Modal & Data States
   const [channels, setChannels] = useState([]);
   const [isChannelModalOpen, setIsChannelModalOpen] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
 
+  // Users State 
+  const [users, setUsers] = useState([]);
+
   const [isLoading, setIsLoading] = useState(false);
 
-  
   useEffect(() => {
     const fetchWorkspaces = async () => {
       try {
@@ -45,7 +54,6 @@ const Sidebar = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  
   useEffect(() => {
     const fetchChannels = async () => {
       if (!activeWorkspace) return;
@@ -69,7 +77,40 @@ const Sidebar = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkspace]); 
 
-  
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const config = { headers: { Authorization: `Bearer ${token}` } };
+        
+        const { data } = await axios.get('/api/users', config);
+        setUsers(data);
+      } catch (error) {
+        console.error("Error fetching users:", error);
+      }
+    };
+    fetchUsers();
+  }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleStatusChange = ({ userId, status }) => {
+      setUsers((prevUsers) => 
+        prevUsers.map((u) => 
+          u._id === userId ? { ...u, status: status } : u
+        )
+      );
+    };
+
+    socket.on('user_status_change', handleStatusChange);
+
+    return () => {
+      socket.off('user_status_change', handleStatusChange);
+    };
+  }, [socket]);
+
+  // Workspace 
   const handleCreateWorkspace = async (e) => {
     e.preventDefault();
     if (!newWorkspaceName.trim()) return;
@@ -95,7 +136,6 @@ const Sidebar = () => {
     }
   };
 
-  
   const handleCreateChannel = async (e) => {
     e.preventDefault();
     if (!newChannelName.trim() || !activeWorkspace) return;
@@ -163,7 +203,10 @@ const Sidebar = () => {
                 {workspaces.map((ws) => (
                   <li key={ws._id}>
                     <button 
-                      onClick={() => setActiveWorkspace(ws)}
+                      onClick={() => {
+                        setActiveWorkspace(ws);
+                        setShowTasks(false); 
+                      }}
                       className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors ${
                         activeWorkspace?._id === ws._id 
                           ? 'bg-primary/10 text-primary font-medium' 
@@ -176,6 +219,27 @@ const Sidebar = () => {
                   </li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {/* Workspace Tools / Tasks Section  */}
+          {activeWorkspace && (
+            <div className="mb-6 px-2">
+              <button 
+                onClick={() => {
+                  setShowTasks(true); 
+                  setActiveChannel(null); 
+                  setActiveDMUser(null); 
+                }}
+                className={`w-full flex items-center gap-2 px-2 py-2 rounded-md transition-colors ${
+                  showTasks
+                    ? 'bg-primary/20 text-primary font-bold border border-primary/30'
+                    : 'bg-surface-container-highest text-on-surface hover:bg-surface-bright border border-outline/10'
+                }`}
+              >
+                <FiCheckSquare className="text-lg shrink-0 text-primary" />
+                <span className="text-sm font-medium">Team Tasks Board</span>
+              </button>
             </div>
           )}
 
@@ -200,9 +264,13 @@ const Sidebar = () => {
                   {channels.map((channel) => (
                     <li key={channel._id}>
                       <button 
-                        onClick={() => setActiveChannel(channel)}
+                        onClick={() => {
+                          setActiveChannel(channel);
+                          setActiveDMUser(null); 
+                          setShowTasks(false); 
+                        }}
                         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors ${
-                          activeChannel?._id === channel._id
+                          activeChannel?._id === channel._id && !showTasks
                             ? 'bg-secondary-container/20 text-secondary font-medium'
                             : 'text-outline hover:bg-surface-bright/50 hover:text-on-surface'
                         }`}
@@ -217,13 +285,61 @@ const Sidebar = () => {
             </div>
           )}
 
+          {/* Team / Direct Messages Section  */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-2 px-2">
+              <span className="text-xs font-semibold text-outline uppercase tracking-wider">Direct Messages</span>
+            </div>
+            
+            {users.length === 0 ? (
+              <p className="text-xs text-outline px-2 italic">No other users yet.</p>
+            ) : (
+              <ul className="space-y-1">
+                {users.filter(u => u._id !== user?._id).map((otherUser) => (
+                  <li key={otherUser._id}>
+                    <button 
+                      onClick={() => {
+                        setActiveDMUser(otherUser);
+                        setActiveChannel(null); 
+                        setShowTasks(false); 
+                      }}
+                      className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors ${
+                        activeDMUser?._id === otherUser._id && !showTasks
+                          ? 'bg-secondary-container/20 text-secondary font-medium'
+                          : 'text-outline hover:bg-surface-bright/50 hover:text-on-surface'
+                      }`}
+                    >
+                      <div className="relative shrink-0">
+                        {/* Profile Avatar */}
+                        <div className="w-5 h-5 rounded flex items-center justify-center bg-surface-bright text-xs font-bold text-primary">
+                          {otherUser.name.charAt(0).toUpperCase()}
+                        </div>
+                        {/* Status Indicator (Green Dot) */}
+                        <div 
+                          className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border-2 border-surface-container transition-colors duration-300 ${
+                            otherUser.status === 'online' ? 'bg-green-500' : 'bg-outline/50'
+                          }`}
+                        ></div>
+                      </div>
+                      <span className="text-sm truncate">{otherUser.name}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
         </div>
 
         {/* User Footer */}
         <div className="p-4 border-t border-outline/20">
           <div className="flex items-center gap-2 mb-4 px-2">
-             <div className="w-8 h-8 bg-surface-bright rounded-full flex items-center justify-center text-primary font-bold text-sm shrink-0">
-                {user?.name?.charAt(0).toUpperCase() || 'U'}
+             <div className="relative shrink-0">
+                <div className="w-8 h-8 bg-surface-bright rounded-full flex items-center justify-center text-primary font-bold text-sm">
+                  {user?.name?.charAt(0).toUpperCase() || 'U'}
+                </div>
+                
+                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-surface-container bg-green-500"></div>
              </div>
              <div className="flex-1 overflow-hidden">
                <p className="text-sm font-medium text-on-surface truncate">{user?.name || 'User'}</p>
