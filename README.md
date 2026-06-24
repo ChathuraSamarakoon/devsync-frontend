@@ -4,8 +4,6 @@ DevSync is a Slack-inspired, real-time collaboration platform built for developm
 
 This repository contains the **frontend** of DevSync, built with React and Vite.
 
-> 🎓 This project was built as part of my internship application / personal portfolio project to demonstrate practical full-stack development skills.
-
 ---
 
 ## ✨ Features
